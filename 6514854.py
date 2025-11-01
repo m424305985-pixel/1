@@ -391,6 +391,7 @@ if start_button:
             k_with_air = np.argmin(np.abs(t_points_with_air - current_time)) if current_time <= t_points_with_air[-1] else len(t_points_with_air) - 1
 
         # ------------------ Update Plot ------------------
+        frame_placeholder = st.empty()
         if i_main % skip_frames == 0 or i_main == max_steps - 1:
             ax.clear()
             
@@ -421,7 +422,9 @@ if start_button:
             if analysis_done:
                 ax.plot(x_user, y_user, 'gs', markersize=10, label=f"Analysis at {t_user:.2f}s")
                 ax.legend()
-            plot_placeholder.pyplot(fig)
+            with frame_placeholder:
+               st.pyplot(fig)
+               time.sleep(0.03)
 
         # ------------------ Update Instantaneous Results ------------------
         if is_primary_flying:
@@ -518,3 +521,4 @@ if start_button:
         </ul>
     </div>
     """, unsafe_allow_html=True)
+
