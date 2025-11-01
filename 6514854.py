@@ -14,6 +14,12 @@ st.markdown("""
 # ================= Session State Setup =================
 if "simulation_run" not in st.session_state:
     st.session_state.simulation_run = False
+if "simulation_started" not in st.session_state:
+    st.session_state.simulation_started = False
+if "current_step" not in st.session_state:
+    st.session_state.current_step = 0
+if "max_steps" not in st.session_state:
+    st.session_state.max_steps = 0
 if "questions" not in st.session_state:
     st.session_state.questions = []
 if "current_question" not in st.session_state:
@@ -27,7 +33,7 @@ if "test_completed" not in st.session_state:
 if "correct_answered" not in st.session_state:
     st.session_state.correct_answered = False
 if "edit_mode" not in st.session_state:
-    st.session_state.edit_mode = False 
+    st.session_state.edit_mode = False
 
 # ================= User Inputs =================
 st.markdown("<h3 style='color:#154360;'>⚙️ Simulation Settings</h3>", unsafe_allow_html=True)
@@ -35,6 +41,299 @@ st.markdown("<h3 style='color:#154360;'>⚙️ Simulation Settings</h3>", unsafe
 col1, col2 = st.columns(2)
 with col1:
     v0 = st.number_input("🔹 Initial Velocity (m/s)", min_value=0.0, value=50.0, step=0.1, format="%.2f")
+with col2:
+    angle = st.number_input("🔹 Launch Angle (°)", min_value=0.0, max_value=90.0, value=45.0, step=0.1, format="%.2f")
+
+col3, col4 = st.columns(2)
+with col3:
+    h0 = st.number_input("🔹 Initial Height (m)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+with col4:
+    t_user = st.number_input("🔹 Instantaneous Time (s)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
+
+st.markdown("<p style='color:gray; font-size:16px;'>If Instantaneous Time = 0, no specific time analysis will be performed.</p>", unsafe_allow_html=True)
+
+# ================= Additional Options =================
+compare_angles = st.checkbox("📐 Compare Complementary Angles (θ & 90°−θ)")
+air_resistance = st.checkbox("🌬️ Air Resistance")
+compare_with_air = st.checkbox("🔄 Compare Trajectories (No Air vs Air Resistance)")
+
+# ================= Physics and Calculations =================
+g = 9.81
+theta = np.radians(angle)
+
+# Function to calculate flight time
+def calculate_flight_time(v0, theta_rad, h0, g):
+    return (v0 * np.sin(theta_rad) + np.sqrt((v0*np.sin(theta_rad))**2 + 2*g*h0)) / g
+
+t_flight = calculate_flight_time(v0, theta, h0, g)
+
+if t_user > t_flight:
+    st.warning("⏳ The entered time exceeds the flight time! The maximum possible time for the primary trajectory will be used.")
+    t_user = t_flight
+
+num_points = 600
+
+# ================= Colors Setup =================
+trail_color = 'black'
+bg_color = 'white'
+if air_resistance:
+    bg_color = '#00CED1'
+
+# ================= Air Resistance Model =================
+def compute_projectile_with_air(v0, theta, h0, g=9.81, c=0.005, dt=0.01):  
+    t_points = [0]
+    x_points = [0]
+    y_points = [h0]
+    vx = v0 * np.cos(theta)
+    vy = v0 * np.sin(theta)
+    t = 0
+    while y_points[-1] >= 0:
+        v = np.sqrt(vx**2 + vy**2)
+        ax = -c * v * vx
+        ay = -g - c * v * vy
+        vx += ax * dt
+        vy += ay * dt
+        x_points.append(x_points[-1] + vx * dt)
+        y_points.append(y_points[-1] + vy * dt)
+        t += dt
+        t_points.append(t)
+        if t > 100:
+            break
+    return np.array(t_points), np.array(x_points), np.array(y_points)
+
+# ================= Trajectory Calculations =================
+if air_resistance:
+    t_points, x_points, y_points = compute_projectile_with_air(v0, theta, h0)
+    t_flight = t_points[-1]
+else:
+    t_points = np.linspace(0, t_flight, num=num_points)
+    x_points = v0 * np.cos(theta) * t_points
+    y_points = h0 + v0 * np.sin(theta) * t_points - 0.5 * g * t_points**2
+    y_points = np.maximum(y_points, 0)
+
+# Complementary Angle Trajectory Calculation
+if compare_angles and angle != 45:
+    theta2 = np.radians(90 - angle)
+    t_flight2 = calculate_flight_time(v0, theta2, h0, g)
+    
+    if air_resistance:
+        t_points2, x_points2, y_points2 = compute_projectile_with_air(v0, theta2, h0)
+        t_flight2 = t_points2[-1]
+    else:
+        t_points2 = np.linspace(0, t_flight2, num=num_points)
+        x_points2 = v0 * np.cos(theta2) * t_points2
+        y_points2 = h0 + v0 * np.sin(theta2) * t_points2 - 0.5 * g * t_points2**2
+        y_points2 = np.maximum(y_points2, 0)
+
+    t_max = max(t_flight, t_flight2)
+else:
+    x_points2 = y_points2 = t_points2 = None
+    t_flight2 = 0
+    t_max = t_flight
+
+# Compare Air Resistance Trajectories
+if compare_with_air and not compare_angles: 
+    t_flight_no_air = calculate_flight_time(v0, theta, h0, g)
+    t_points_no_air = np.linspace(0, t_flight_no_air, num=num_points)
+    x_points_no_air = v0 * np.cos(theta) * t_points_no_air
+    y_points_no_air = h0 + v0 * np.sin(theta) * t_points_no_air - 0.5 * g * t_points_no_air**2
+    y_points_no_air = np.maximum(y_points_no_air, 0)
+    
+    if air_resistance:
+        t_points_with_air, x_points_with_air, y_points_with_air = t_points, x_points, y_points
+    else:
+        t_points_with_air, x_points_with_air, y_points_with_air = compute_projectile_with_air(v0, theta, h0)
+    
+    t_max = max(t_flight, t_points_with_air[-1]) if air_resistance else max(t_flight_no_air, t_points_with_air[-1])
+else:
+    t_points_no_air = x_points_no_air = y_points_no_air = None
+    t_points_with_air = x_points_with_air = y_points_with_air = None
+
+# ================= Initialize Simulation Data =================
+if "simulation_data" not in st.session_state:
+    st.session_state.simulation_data = {
+        'x_points': x_points,
+        'y_points': y_points,
+        't_points': t_points,
+        'x_points2': x_points2,
+        'y_points2': y_points2,
+        't_points2': t_points2,
+        'x_points_no_air': t_points_no_air,
+        'y_points_no_air': y_points_no_air,
+        'x_points_with_air': x_points_with_air,
+        'y_points_with_air': y_points_with_air,
+        't_max': t_max,
+        't_flight': t_flight,
+        't_flight2': t_flight2,
+        'compare_angles': compare_angles,
+        'compare_with_air': compare_with_air,
+        'air_resistance': air_resistance,
+        'angle': angle,
+        'v0': v0,
+        'h0': h0,
+        'theta': theta
+    }
+
+# ================= Display Interface =================
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    fig, ax = plt.subplots()
+    fig.patch.set_facecolor(bg_color)
+    
+    # Determine max range and height for plotting
+    x_max = max(x_points) * 1.1
+    y_max = max(y_points) * 1.2
+    
+    if compare_angles and x_points2 is not None:
+        x_max = max(x_max, max(x_points2) * 1.1)
+        y_max = max(y_max, max(y_points2) * 1.2)
+    
+    if compare_with_air and not compare_angles:
+        x_max = max(x_max, max(x_points_no_air) * 1.1, max(x_points_with_air) * 1.1)
+        y_max = max(y_max, max(y_points_no_air) * 1.2, max(y_points_with_air) * 1.2)
+    
+    ax.set_xlim(0, x_max)
+    ax.set_ylim(0, y_max)
+    ax.set_xlabel("Range (m)")
+    ax.set_ylabel("Height (m)")
+    ax.set_title("The Projectile Motion Trajectory")
+    ax.grid(True)
+    plot_placeholder = st.empty()
+
+# ================= Start/Stop Simulation Buttons =================
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    if not st.session_state.simulation_started:
+        if st.button("🚀 Start Simulation", use_container_width=True):
+            st.session_state.simulation_started = True
+            st.session_state.simulation_run = True
+            st.session_state.current_step = 0
+            # Calculate max steps
+            if not air_resistance:
+                max_steps = num_points
+            else:
+                max_steps = len(t_points)
+                if t_points2 is not None:
+                    max_steps = max(max_steps, len(t_points2))
+                if compare_with_air and t_points_with_air is not None:
+                    max_steps = max(max_steps, len(t_points_with_air))
+            
+            st.session_state.max_steps = max_steps
+            st.rerun()
+    else:
+        if st.button("⏹️ Stop Simulation", use_container_width=True):
+            st.session_state.simulation_started = False
+            st.session_state.simulation_run = False
+            st.rerun()
+
+with col_btn2:
+    if st.session_state.simulation_started:
+        if st.button("🔄 Reset Simulation", use_container_width=True):
+            st.session_state.simulation_started = False
+            st.session_state.simulation_run = False
+            st.session_state.current_step = 0
+            st.rerun()
+
+# ================= Simulation Animation =================
+if st.session_state.simulation_started and st.session_state.simulation_run:
+    current_step = st.session_state.current_step
+    max_steps = st.session_state.max_steps
+    data = st.session_state.simulation_data
+    
+    # Calculate current time
+    t_step = data['t_max'] / max_steps
+    current_time = current_step * t_step
+    
+    # Update plot based on current step
+    ax.clear()
+    ax.set_xlim(0, x_max)
+    ax.set_ylim(0, y_max)
+    ax.set_xlabel("Range (m)")
+    ax.set_ylabel("Height (m)")
+    ax.set_title("The Projectile Motion Trajectory")
+    ax.grid(True)
+    
+    # Primary trajectory
+    i = min(current_step, len(data['x_points']) - 1)
+    ax.plot(data['x_points'][:i+1], data['y_points'][:i+1], color=trail_color, label=f"{angle:.1f}°")
+    if current_time <= data['t_flight']:
+        ax.plot(data['x_points'][i], data['y_points'][i], 'ro', markersize=10)
+    
+    # Secondary trajectory (complementary angles)
+    if data['compare_angles'] and data['x_points2'] is not None:
+        j = min(current_step, len(data['x_points2']) - 1)
+        ax.plot(data['x_points2'][:j+1], data['y_points2'][:j+1], color='orange', linestyle='--', label=f"{90-angle:.1f}°")
+        if current_time <= data['t_flight2']:
+            ax.plot(data['x_points2'][j], data['y_points2'][j], 'bs', markersize=8)
+    
+    # Air resistance comparison
+    if data['compare_with_air'] and not data['compare_angles']:
+        k_no_air = min(current_step, len(data['x_points_no_air']) - 1)
+        k_with_air = min(current_step, len(data['x_points_with_air']) - 1)
+        ax.plot(data['x_points_no_air'][:k_no_air+1], data['y_points_no_air'][:k_no_air+1], color='blue', linestyle='-', label=f"{angle:.1f}° (No Air)")
+        ax.plot(data['x_points_with_air'][:k_with_air+1], data['y_points_with_air'][:k_with_air+1], color='red', linestyle='--', label=f"{angle:.1f}° (With Air)")
+    
+    ax.legend()
+    plot_placeholder.pyplot(fig)
+    
+    # Update progress
+    if not compare_angles:
+        progress_bar = st.progress((current_step + 1) / max_steps)
+    
+    # Calculate instantaneous velocities
+    if current_time <= data['t_flight'] and i < len(data['x_points']) - 1:
+        i_next = min(i + 1, len(data['x_points']) - 1)
+        vx = (data['x_points'][i_next] - data['x_points'][i]) / (data['t_points'][i_next] - data['t_points'][i]) if i_next > i else 0
+        vy = (data['y_points'][i_next] - data['y_points'][i]) / (data['t_points'][i_next] - data['t_points'][i]) if i_next > i else 0
+        v_total = np.sqrt(vx**2 + vy**2)
+        
+        with col_right:
+            results_placeholder = st.empty()
+            results_placeholder.markdown(f"""
+            <div style='background-color:#f7f9f9;padding:15px;border-radius:10px;margin-bottom:10px;font-size:16px;'>
+                <h4>📊 Instant Results ({angle:.1f}°)</h4>
+                <ul>
+                    <li>⏱  Time: <b>{current_time:.2f}</b> (s)</li>
+                    <li>📍  Horizontal Distance (x): <b>{data['x_points'][i]:.2f}</b> m</li>
+                    <li>📈 Height (y): <b>{data['y_points'][i]:.2f}</b> m</li>
+                    <li>💨 Vertical Velocity (Vy): <b>{vy:.2f}</b> m/s</li>
+                    <li>💨 Horizontal Velocity (Vx): <b>{vx:.2f}</b> m/s</li>
+                    <li>💨 Net Velocity (V): <b>{v_total:.2f}</b> m/s</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Move to next step
+    if current_step < max_steps - 1:
+        st.session_state.current_step += 1
+        time.sleep(0.05)  # Control animation speed
+        st.rerun()
+    else:
+        st.session_state.simulation_run = False
+        st.session_state.simulation_started = False
+        
+        # Show final results
+        with col_right:
+            final_placeholder = st.empty()
+            t_max_height = v0 * np.sin(theta) / g
+            final_range_primary = data['x_points'][-1]
+            final_max_height = max(data['y_points'])
+            
+            final_placeholder.markdown(f"""
+            <div style='background-color:#f4ecf7;padding:15px;border-radius:10px;margin-bottom:10px;font-size:16px;'>
+                <h3>🏁 Final Results</h3>
+                <ul>
+                    <li>Flight Time (t'): <b>{t_flight:.2f}</b> s</li>
+                    <li>Time To Reach Maximum Height: <b>{t_max_height:.2f}</b> s</li>
+                    <li>Range: <b>{final_range_primary:.2f}</b> m</li>
+                    <li>Maximum Height: <b>{final_max_height:.2f}</b> m </li>
+                    <li>Trajectory Equation: <b>y(x) = {h0:.2f} + x.tan({angle:.2f}°) - (9.81/(2*({v0:.2f}·cos({angle:.2f}°))²)).x²</b></li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
+# باقي الكود الخاص بنظام الأسئلة يبقى كما هو...    v0 = st.number_input("🔹 Initial Velocity (m/s)", min_value=0.0, value=50.0, step=0.1, format="%.2f")
 with col2:
     angle = st.number_input("🔹 Launch Angle (°)", min_value=0.0, max_value=90.0, value=45.0, step=0.1, format="%.2f")
 
@@ -521,4 +820,5 @@ if start_button:
         </ul>
     </div>
     """, unsafe_allow_html=True)
+
 
